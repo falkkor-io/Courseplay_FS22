@@ -200,11 +200,10 @@ function CpAIFieldWorker:startCpAtFirstWp()
     self:updateAIFieldWorkerImplementData()
     if self:hasCpCourse() and self:getCanStartCpFieldWork() then
         spec.cpJobStartAtFirstWp:applyCurrentState(self, g_currentMission, g_currentMission.player.farmId, true)
-
         --- Applies the lane offset set in the hud, so ad can start with the correct lane offset.
-        spec.cpJobStartAtFirstWp:getCpJobParameters().laneOffset:setValue(spec.cpJob:getCpJobParameters().laneOffset:getValue())
+        spec.cpJobStartAtFirstWp:getCpJobParameters().laneOffset:setValue(self:getCpLaneOffsetSetting():getValue())
         spec.cpJobStartAtFirstWp:setValues()
-        local success = spec.cpJob:validate(false)
+        local success = spec.cpJobStartAtFirstWp:validate(false)
         if success then
             g_client:getServerConnection():sendEvent(AIJobStartRequestEvent.new(spec.cpJobStartAtFirstWp, self:getOwnerFarmId()))
             return true
@@ -218,8 +217,13 @@ function CpAIFieldWorker:startCpAtLastWp()
     self:updateAIFieldWorkerImplementData()
     if self:hasCpCourse() and self:getCanStartCpFieldWork() then
         spec.cpJobStartAtLastWp:applyCurrentState(self, g_currentMission, g_currentMission.player.farmId, true)
+        --- Applies the lane offset set in the hud, so ad can start with the correct lane offset.
+        --- TODO: This should only be applied, if the driver was started for the first time by ad and not every time.
+        spec.cpJobStartAtLastWp:getCpJobParameters().laneOffset:setValue(self:getCpLaneOffsetSetting():getValue())
         spec.cpJobStartAtLastWp:setValues()
-        local success = spec.cpJob:validate(false)
+        CpUtil.debugVehicle(CpDebug.DBG_FIELDWORK, self, "lane offset: %s", spec.cpJobStartAtLastWp:getCpJobParameters().laneOffset:getString())
+        local success = spec.cpJobStartAtLastWp:validate(false)
+        CpUtil.debugVehicle(CpDebug.DBG_FIELDWORK, self, "lane offset: %s", spec.cpJobStartAtLastWp:getCpJobParameters().laneOffset:getString())
         if success then
             g_client:getServerConnection():sendEvent(AIJobStartRequestEvent.new(spec.cpJobStartAtLastWp, self:getOwnerFarmId()))
             return true
