@@ -28,7 +28,7 @@ AIDriveStrategyFindBales.myStates = {
     DRIVING_TO_NEXT_BALE = {},
     APPROACHING_BALE = {},
     WORKING_ON_BALE = {},
-    REVERSING_AFTER_PATHFINDER_FAILURE ={}
+    REVERSING_AFTER_PATHFINDER_FAILURE = {}
 }
 
 function AIDriveStrategyFindBales.new(customMt)
@@ -80,18 +80,22 @@ function AIDriveStrategyFindBales:collectNextBale()
         self:findPathToNextBale()
     else
         self:info('No bales found, scan the field once more before leaving for the unload course.')
-        self.bales = self:findBales()
+        local wrongWrapType
+        self.bales, wrongWrapType = self:findBales()
         if #self.bales > 0 then
             self:info('Found more bales, collecting them')
             self:findPathToNextBale()
             return
         end
-        if self.baleLoader and self.baleLoaderController:hasBales() then 
+        if self.baleLoader and self.baleLoaderController:hasBales() then
             if self.baleLoaderController:canBeFolded() then
                 --- Wait until the animations have finished and then make sure the bale loader can be send back with auto drive.
                 self:info('There really are no more bales on the field')
                 self.vehicle:stopCurrentAIJob(AIMessageErrorIsFull.new())
             end
+        elseif self.baleLoader and wrongWrapType then 
+            self:info('Only bales with a wrong wrap type left.')
+            self.vehicle:stopCurrentAIJob(AIMessageErrorWrongBaleWrapType.new())
         else
             self:info('There really are no more bales on the field')
             self.vehicle:stopCurrentAIJob(AIMessageSuccessFinishedJob.new())
@@ -106,6 +110,13 @@ function AIDriveStrategyFindBales:initializeImplementControllers(vehicle)
     self.baleLoader = AIUtil.getImplementWithSpecialization(vehicle, BaleLoader)
     if self.baleLoader then
         self.baleLoaderController = BaleLoaderController(vehicle, self.baleLoader)
+    else
+        local implements, found = AIUtil.getAllChildVehiclesWithSpecialization(vehicle, nil, "spec_aPalletAutoLoader")
+        if found then
+            self.baleLoaderController = APalletAutoLoaderController(vehicle, implements[1])
+        end
+    end
+    if self.baleLoader then
         self.baleLoaderController:setDriveStrategy(self)
         table.insert(self.controllers, self.baleLoaderController)
     end
@@ -135,21 +146,28 @@ function AIDriveStrategyFindBales:setFieldPolygon(fieldPolygon)
     self.fieldPolygon = fieldPolygon
 end
 
+--- Bale wrap type for the bale loader. 
+function AIDriveStrategyFindBales:setJobParameterValues(jobParameters)
+    self.baleWrapType = jobParameters.baleWrapType:getValue()
+    self:debug("Bale type selected: %s", tostring(self.baleWrapType))
+end
 -----------------------------------------------------------------------------------------------------------------------
 --- Bale finding
 -----------------------------------------------------------------------------------------------------------------------
 ---@param bale BaleToCollect
 function AIDriveStrategyFindBales:isBaleOnField(bale)
     local x, _, z = bale:getPosition()
-    return CpMathUtil.isPointInPolygon(self.fieldPolygon, x, z) 
+    return CpMathUtil.isPointInPolygon(self.fieldPolygon, x, z)
 end
 
 --- Find bales on field
 ---@return BaleToCollect[] list of bales found
 function AIDriveStrategyFindBales:findBales()
-    local balesFound = {}
+    local balesFound, baleWithWrongWrapType = {}, false
     for _, object in pairs(g_currentMission.nodeToObject) do
-        if BaleToCollect.isValidBale(object, self.baleWrapper, self.baleLoader) then
+        local isValid, wrongWrapType = BaleToCollect.isValidBale(object, 
+                self.baleWrapper, self.baleLoader, self.baleWrapType)
+        if isValid then
             local bale = BaleToCollect(object)
             -- if the bale has a mountObject it is already on the loader so ignore it
             if not object.mountObject and object:getOwnerFarmId() == self.vehicle:getOwnerFarmId() and
@@ -158,14 +176,14 @@ function AIDriveStrategyFindBales:findBales()
                 balesFound[object.id] = bale
             end
         end
+        baleWithWrongWrapType = baleWithWrongWrapType or wrongWrapType
     end
-    -- convert it to a normal array so lua can give us the number of entries
     local bales = {}
     for _, bale in pairs(balesFound) do
         table.insert(bales, bale)
     end
-    self:debug('Found %d bales', #bales)
-    return bales
+    self:debug('Found %d bales.', #bales)
+    return bales, baleWithWrongWrapType
 end
 
 ---@return BaleToCollect, number closest bale and its distance
@@ -210,7 +228,9 @@ function AIDriveStrategyFindBales:getDubinsPathLengthToBale(bale)
 end
 
 function AIDriveStrategyFindBales:findPathToNextBale()
-    if not self.bales then return end
+    if not self.bales then
+        return
+    end
     local bale, d, ix = self:findClosestBale(self.bales)
     if ix then
         if bale:isLoaded() then
@@ -254,9 +274,8 @@ function AIDriveStrategyFindBales:startPathfindingToBale(bale)
                 configuredOffset and string.format('%.1f', configuredOffset) or 'n/a')
         local done, path, goalNodeInvalid
         -- use no off-field penalty if we are on a custom field
-        self.pathfinder, done, path, goalNodeInvalid =
-        PathfinderUtil.startPathfindingFromVehicleToGoal(self.vehicle, goal, false, nil,
-                {}, self.lastBale and {self.lastBale} or {}, nil, nil)
+        self.pathfinder, done, path, goalNodeInvalid = PathfinderUtil.startPathfindingFromVehicleToGoal(self.vehicle, goal, false, nil,
+                {}, self:getBalesToIgnore(), nil, nil)
         if done then
             return self:onPathfindingDoneToNextBale(path, goalNodeInvalid)
         else
@@ -315,13 +334,23 @@ function AIDriveStrategyFindBales:isObstacleAhead()
             return true
         end
     end
+    local objectsToIgnore = self:getBalesToIgnore()
     -- then a more thorough check, we want to ignore the last bale we worked on as that may lay around too close
     -- to the baler. This happens for example to the Andersen bale wrapper.
-    self:debug('Check obstacles ahead, ignoring bale object %s', self.lastBale and self.lastBale or 'nil')
-    local leftOk, rightOk, straightOk =
-    PathfinderUtil.checkForObstaclesAhead(self.vehicle, self.turningRadius, self.lastBale and{self.lastBale})
+    self:debug('Check obstacles ahead, ignoring %d bale object, first is %s', #objectsToIgnore, objectsToIgnore[1] or 'nil')
+    local leftOk, rightOk, straightOk = PathfinderUtil.checkForObstaclesAhead(self.vehicle, self.turningRadius, objectsToIgnore)
     -- if at least one is ok, we are good to go.
     return not (leftOk or rightOk or straightOk)
+end
+
+function AIDriveStrategyFindBales:getBalesToIgnore()
+    local objectsToIgnore = {}
+    if self.lastBale then
+        return { self.lastBale }
+    elseif self.baleLoaderController then
+        return self.baleLoaderController:getBalesToIgnore()
+    end
+    return objectsToIgnore
 end
 
 function AIDriveStrategyFindBales:isNearFieldEdge()

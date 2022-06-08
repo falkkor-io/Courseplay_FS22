@@ -59,11 +59,19 @@ function AIDriveStrategyVineFieldWorkCourse:startTurn(ix)
     local _, frontMarkerDistance = AIUtil.getFirstAttachedImplement(self.vehicle)
     local _, backMarkerDistance = AIUtil.getLastAttachedImplement(self.vehicle)
 
+    --- Checks if the vehicle direction is inverted.
+    local directionNode = self.vehicle:getAIDirectionNode()
+    local _, _, dz = localToLocal(self.vehicle.rootNode, directionNode, 0, 0, 0)
+    if dz < 0 then 
+        self:debug('Starting turn is inverted, because the drive direction is inverted')
+        frontMarkerDistance, backMarkerDistance = backMarkerDistance, frontMarkerDistance
+    end
+
     self:debug('Starting a turn at waypoint %d, front marker %.1f, back marker %.1f', ix, frontMarkerDistance, backMarkerDistance)
     self.ppc:setShortLookaheadDistance()
 
 
-    self.turnContext = TurnContext(self.course, ix, ix + 1, self.turnNodes, self:getWorkWidth(),
+    self.turnContext = TurnContext(self.vehicle, self.course, ix, ix + 1, self.turnNodes, self:getWorkWidth(),
             frontMarkerDistance, -backMarkerDistance, 0, 0)
     self.aiTurn = VineTurn(self.vehicle, self, self.ppc, self.turnContext, self.course, self.workWidth)
     self.state = self.states.TURNING

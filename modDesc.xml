@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" standalone="no" ?>
-<modDesc descVersion="64">
-    <version>7.0.1.16</version>
+<modDesc descVersion="65">
+    <version>7.0.1.19</version>
 	<author><![CDATA[Courseplay.devTeam]]></author>
 	<title>
 		<en>CoursePlay</en>
@@ -109,6 +109,7 @@ Ein ganz großes Danke geht an unsere Übersetzer und an die Community für die 
 		<sourceFile filename="scripts/ai/controllers/BalerController.lua"/>
 		<sourceFile filename="scripts/ai/controllers/BaleWrapperController.lua"/>
 		<sourceFile filename="scripts/ai/controllers/BaleLoaderController.lua"/>
+		<sourceFile filename="scripts/ai/controllers/APalletAutoLoaderController.lua"/>
 		<sourceFile filename="scripts/ai/controllers/FertilizingCultivatorController.lua"/>
 		<sourceFile filename="scripts/ai/controllers/FertilizingSowingMachineController.lua"/>
 		<sourceFile filename="scripts/ai/controllers/SowingMachineController.lua"/>
@@ -153,7 +154,7 @@ Ein ganz großes Danke geht an unsere Übersetzer und an die Community für die 
 		<sourceFile filename="scripts/gui/CpCourseManagerFrame.lua"/>
 		<sourceFile filename="scripts/gui/CourseDisplay.lua"/>
 		<sourceFile filename="scripts/gui/CpAIHotspots.lua"/>
-		<sourceFile filename="scripts/gui/VehicleSettingDisplayDialog.lua"/>
+		<sourceFile filename="scripts/gui/CpGamePadHudScreen.lua"/>
 		<sourceFile filename="scripts/gui/hud/HudElements.lua"/>
 		<sourceFile filename="scripts/gui/hud/CpBaseHud.lua"/>
 		<sourceFile filename="scripts/gui/hud/CpHudInfoTexts.lua"/>
@@ -172,7 +173,7 @@ Ein ganz großes Danke geht an unsere Übersetzer und an die Community für die 
 		<specialization name="cpAIWorker" className="CpAIWorker" filename="scripts/specializations/CpAIWorker.lua"/>
 		<specialization name="cpAIFieldWorker" className="CpAIFieldWorker" filename="scripts/specializations/CpAIFieldWorker.lua"/>
 		<specialization name="cpAIBaleFinder" className="CpAIBaleFinder" filename="scripts/specializations/CpAIBaleFinder.lua"/>
-		<specialization name="cpVehicleSettingDisplay" className="CpVehicleSettingDisplay" filename="scripts/specializations/CpVehicleSettingDisplay.lua"/>
+		<specialization name="cpGamePadHud" className="CpGamePadHud" filename="scripts/specializations/CpGamePadHud.lua"/>
 		<specialization name="cpHud" className="CpHud" filename="scripts/specializations/CpHud.lua"/>
 		<specialization name="cpInfoTexts" className="CpInfoTexts" filename="scripts/specializations/CpInfoTexts.lua"/>
 	</specializations>

@@ -7,18 +7,34 @@ CpVehicleSettings = {}
 
 CpVehicleSettings.MOD_NAME = g_currentModName
 CpVehicleSettings.KEY = "."..CpVehicleSettings.MOD_NAME..".cpVehicleSettings"
+CpVehicleSettings.SETTINGS_KEY = ".settings"
+CpVehicleSettings.USER_KEY = ".users"
 function CpVehicleSettings.initSpecialization()
 	local schema = Vehicle.xmlSchemaSavegame
-    local key = "vehicles.vehicle(?)"..CpVehicleSettings.KEY.."(?)"
-    schema:register(XMLValueType.INT, key.."#value", "Old setting save format.")
-    schema:register(XMLValueType.STRING, key.."#currentValue", "Setting value")
-    schema:register(XMLValueType.STRING, key.."#name", "Setting name")
+    --- Old xml schema for settings
+    CpSettingsUtil.registerXmlSchema(schema, 
+        "vehicles.vehicle(?)" .. CpVehicleSettings.KEY .. "(?)")
+   
+    --- New xml schema for settings
+    CpSettingsUtil.registerXmlSchema(schema, 
+        "vehicles.vehicle(?)" .. CpVehicleSettings.KEY .. CpVehicleSettings.SETTINGS_KEY .. "(?)")
+   
+    --- MP vehicle user settings
+
+    schema:register(XMLValueType.STRING,"vehicles.vehicle(?)" .. CpVehicleSettings.KEY .. CpVehicleSettings.USER_KEY .. "(?)#userId", "User id")
+    CpSettingsUtil.registerXmlSchema(schema, 
+        "vehicles.vehicle(?)" .. CpVehicleSettings.KEY .. CpVehicleSettings.USER_KEY .. "(?)")
 end
 
 
 function CpVehicleSettings.prerequisitesPresent(specializations)
     return SpecializationUtil.hasSpecialization(AIFieldWorker, specializations) 
 end
+
+function CpVehicleSettings.registerEvents(vehicleType)
+    SpecializationUtil.registerEvent(vehicleType, 'onCpUserSettingChanged')
+end
+
 
 function CpVehicleSettings.registerEventListeners(vehicleType)	
 --	SpecializationUtil.registerEventListener(vehicleType, "onRegisterActionEvents", CpVehicleSettings)
@@ -29,12 +45,15 @@ function CpVehicleSettings.registerEventListeners(vehicleType)
     SpecializationUtil.registerEventListener(vehicleType, "onCpUnitChanged", CpVehicleSettings)
     SpecializationUtil.registerEventListener(vehicleType, "onReadStream", CpVehicleSettings)
     SpecializationUtil.registerEventListener(vehicleType, "onWriteStream", CpVehicleSettings)
+    SpecializationUtil.registerEventListener(vehicleType, "onStateChange", CpVehicleSettings)
+    SpecializationUtil.registerEventListener(vehicleType, "onCpUserSettingChanged", CpVehicleSettings)
 end
 
 function CpVehicleSettings.registerFunctions(vehicleType)
-
     SpecializationUtil.registerFunction(vehicleType, 'getCpSettingsTable', CpVehicleSettings.getSettingsTable)
     SpecializationUtil.registerFunction(vehicleType, 'getCpSettings', CpVehicleSettings.getSettings)
+    SpecializationUtil.registerFunction(vehicleType, 'cpSaveUserSettingValue', CpVehicleSettings.cpSaveUserSettingValue)
+    SpecializationUtil.registerFunction(vehicleType, 'getCpSavedUserSettingValue', CpVehicleSettings.getCpSavedUserSettingValue)
 end
 
 --- Gets all settings.
@@ -56,10 +75,10 @@ function CpVehicleSettings:onLoad(savegame)
     local spec = self.spec_cpVehicleSettings
 
     --- Clones the generic settings to create different settings containers for each vehicle. 
-    CpSettingsUtil.cloneSettingsTable(spec,CpVehicleSettings.settings,self,CpVehicleSettings)
+    CpSettingsUtil.cloneSettingsTable(spec, CpVehicleSettings.settings, self, CpVehicleSettings)
     
-    CpVehicleSettings.loadSettings(self,savegame)
-    
+    spec.userSettings = {}
+    CpVehicleSettings.loadSettings(self, savegame)
 end
 
 function CpVehicleSettings:onLoadFinished()
@@ -97,6 +116,22 @@ function CpVehicleSettings:onPreDetachImplement(implement)
     CpVehicleSettings.validateSettings(self)
 end
 
+--- Changes the sprayer work width on fill type change, as it might depend on the loaded fill type.
+--- For example Lime and Fertilizer might have a different work width.
+function CpVehicleSettings:onStateChange(state, data)
+    if state == Vehicle.STATE_CHANGE_FILLTYPE_CHANGE and self:getIsSynchronized() then
+        local _, hasSprayer = AIUtil.getAllChildVehiclesWithSpecialization(self, Sprayer, nil)
+        if hasSprayer then 
+            local width, offset = WorkWidthUtil.getAutomaticWorkWidthAndOffset(self, nil, nil)
+            local oldWidth = self:getCourseGeneratorSettings().workWidth:getValue()
+            if not MathUtil.equalEpsilon(width, oldWidth, 1)  then 
+                CpUtil.debugVehicle(CpDebug.DBG_IMPLEMENTS, self, "Changed work width, as the fill type changed.")
+                self:getCourseGeneratorSettings().workWidth:setFloatValue(width)
+            end
+        end
+    end
+end
+
 function CpVehicleSettings:setAutomaticWorkWidthAndOffset(ignoreObject)
     local spec = self.spec_cpVehicleSettings
     local width, offset = WorkWidthUtil.getAutomaticWorkWidthAndOffset(self, nil, ignoreObject)
@@ -104,51 +139,88 @@ function CpVehicleSettings:setAutomaticWorkWidthAndOffset(ignoreObject)
     spec.toolOffsetX:setFloatValue(offset)
 end
 
-function CpVehicleSettings:onReadStream(streamId)
+function CpVehicleSettings:onReadStream(streamId, connection)
     local spec = self.spec_cpVehicleSettings
-    for i,setting in ipairs(spec.settings) do 
-        setting:readStream(streamId)
+    for i, setting in ipairs(spec.settings) do 
+        setting:readStream(streamId, connection)
     end
 end
 
-function CpVehicleSettings:onWriteStream(streamId)
+function CpVehicleSettings:onWriteStream(streamId, connection)
     local spec = self.spec_cpVehicleSettings
-    for i,setting in ipairs(spec.settings) do 
-        setting:writeStream(streamId)
+    for i, setting in ipairs(spec.settings) do 
+        setting:writeStream(streamId, connection)
+    end
+end
+
+function CpVehicleSettings:cpSaveUserSettingValue(userId, name, value)
+    local spec = self.spec_cpVehicleSettings
+    if spec.userSettings[userId] == nil then 
+        spec.userSettings[userId] = {}
+    end
+    spec.userSettings[userId][name] = value
+end
+
+function CpVehicleSettings:getCpSavedUserSettingValue(setting, connection)
+    local spec = self.spec_cpVehicleSettings
+    local uniqueUserId = g_currentMission.userManager:getUniqueUserIdByConnection(connection)
+    if spec.userSettings[uniqueUserId] then 
+        return spec.userSettings[uniqueUserId][setting:getName()]
     end
 end
 
 function CpVehicleSettings.loadSettingsSetup()
     local filePath = Utils.getFilename("config/VehicleSettingsSetup.xml", g_Courseplay.BASE_DIRECTORY)
-    CpSettingsUtil.loadSettingsFromSetup(CpVehicleSettings,filePath)
+    CpSettingsUtil.loadSettingsFromSetup(CpVehicleSettings, filePath)
 end
 CpVehicleSettings.loadSettingsSetup()
 
 function CpVehicleSettings.getSettingSetup()
-    return CpVehicleSettings.settingsBySubTitle,CpVehicleSettings.pageTitle
+    return CpVehicleSettings.settingsBySubTitle, CpVehicleSettings.pageTitle
 end
 
 function CpVehicleSettings:loadSettings(savegame)
     if savegame == nil or savegame.resetVehicles then return end
     local spec = self.spec_cpVehicleSettings
-	savegame.xmlFile:iterate(savegame.key..CpVehicleSettings.KEY, function (ix, key)
+
+    --- Loads the old save format
+    CpSettingsUtil.loadFromXmlFile(spec, savegame.xmlFile, 
+                        savegame.key .. CpVehicleSettings.KEY, self)
+
+    --- Loads the new save format
+    CpSettingsUtil.loadFromXmlFile(spec, savegame.xmlFile, 
+                        savegame.key .. CpVehicleSettings.KEY .. CpVehicleSettings.SETTINGS_KEY, self)
+
+    --- Loads the user settings for multiplayer.
+    savegame.xmlFile:iterate(savegame.key..CpVehicleSettings.KEY..CpVehicleSettings.USER_KEY, function (ix, key)
         local name = savegame.xmlFile:getValue(key.."#name")
-        local setting = spec[name]
-        if setting then
-            setting:loadFromXMLFile(savegame.xmlFile, key)
-            CpUtil.debugVehicle(CpUtil.DBG_HUD,self,"Loaded setting: %s, value:%s, key: %s",setting:getName(),setting:getValue(),key)
+        local value =  tonumber(savegame.xmlFile:getValue(key.."#currentValue"))
+        local userId = savegame.xmlFile:getValue(key.."#userId")
+        if userId then
+            if spec.userSettings[userId] == nil then 
+                spec.userSettings[userId] = {}
+            end
+            spec.userSettings[userId][name] = value
         end
-        spec.wasLoaded = true
 	end)
+
 end
 
-function CpVehicleSettings:saveToXMLFile(xmlFile, key, usedModNames)
+function CpVehicleSettings:saveToXMLFile(xmlFile, baseKey, usedModNames)
     local spec = self.spec_cpVehicleSettings
-    for i,setting in ipairs(spec.settings) do 
-        local key = string.format("%s(%d)",key,i-1)
-        setting:saveToXMLFile(xmlFile, key, usedModNames)
-        xmlFile:setValue(key.."#name",setting:getName())
-        CpUtil.debugVehicle(CpUtil.DBG_HUD,self,"Saved setting: %s, value:%s, key: %s",setting:getName(),setting:getValue(),key)
+    --- Saves the settings.
+    CpSettingsUtil.saveToXmlFile(spec.settings, xmlFile, 
+        baseKey .. CpVehicleSettings.SETTINGS_KEY, self, nil)
+    --- Saves the user settings for multiplayer.
+    local ix = 0
+    for userId, settings in pairs(spec.userSettings) do 
+        for name, value in pairs(settings) do 
+            local key = string.format("%s(%d)", baseKey.. CpVehicleSettings.USER_KEY, ix)
+            xmlFile:setValue(key.."#name", name)
+            xmlFile:setValue(key.."#currentValue", tostring(value))
+            xmlFile:setValue(key.."#userId", userId)
+            ix = ix + 1
+        end
     end
 end
 
@@ -160,7 +232,7 @@ function CpVehicleSettings:raiseCallback(callbackStr, setting, ...)
 end
 
 function CpVehicleSettings:raiseDirtyFlag(setting)
-    VehicleSettingsEvent.sendEvent(self,setting)
+    VehicleSettingsEvent.sendEvent(self, setting)
 end 
 
 function CpVehicleSettings:validateSettings()
@@ -221,7 +293,7 @@ end
 
 --- Are the combine settings needed.
 function CpVehicleSettings:areCombineSettingsVisible()
-    local implement = AIUtil.getImplementOrVehicleWithSpecialization(self,Combine)
+    local implement = AIUtil.getImplementOrVehicleWithSpecialization(self, Combine)
     return implement and not ImplementUtil.isChopper(implement)
 end
 
@@ -235,7 +307,7 @@ end
 
 --- Disables tool offset, as the plow drive strategy automatically handles the tool offset.
 function CpVehicleSettings:isToolOffsetDisabled()
-    return AIUtil.getImplementOrVehicleWithSpecialization(self,Plow)
+    return AIUtil.getImplementOrVehicleWithSpecialization(self, Plow)
 end
 
 --- Only shows the setting if a valid tool with ridge markers is attached.
@@ -250,8 +322,8 @@ function CpVehicleSettings:isOptionalSowingMachineSettingVisible()
 end
 
 function CpVehicleSettings:isSowingMachineFertilizerSettingVisible()
-    return AIUtil.hasChildVehicleWithSpecialization(self,FertilizingSowingMachine) or 
-             AIUtil.hasChildVehicleWithSpecialization(self,FertilizingCultivator)
+    return AIUtil.hasChildVehicleWithSpecialization(self, FertilizingSowingMachine) or 
+             AIUtil.hasChildVehicleWithSpecialization(self, FertilizingCultivator)
 end
 
 --- Only show the multi tool settings, with a multi tool course loaded.
@@ -272,4 +344,11 @@ function CpVehicleSettings:isAdditiveFillUnitSettingVisible()
         hasAdditiveTank = hasAdditiveTank or forageWagons[1].spec_forageWagon.additives.available
     end
     return hasAdditiveTank
+end
+
+--- Saves the user value changed on the server.
+function CpVehicleSettings:onCpUserSettingChanged(setting)
+    if not self.isServer then 
+        VehicleUserSettingsEvent.sendEvent(self, setting)
+    end
 end

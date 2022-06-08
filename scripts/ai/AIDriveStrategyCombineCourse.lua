@@ -520,7 +520,6 @@ function AIDriveStrategyCombineCourse:changeToUnloadOnField()
 		-- is our pipe in the fruit? (assuming pipe is on the left side)
 		local pullBackCourse = self:createPullBackCourse()
 		if pullBackCourse then
-			pullBackCourse:print()
 			self:debug('Pipe in fruit, pulling back to make room for unloading')
 			self:stopForUnload(self.states.PULLING_BACK_FOR_UNLOAD, true)
 			self.courseAfterPullBack = self.course
@@ -892,26 +891,6 @@ function AIDriveStrategyCombineCourse:findBestWaypointToUnloadOnUpDownRows(ix, i
 	end
 end
 
-function AIDriveStrategyCombineCourse:updateLightsOnField()
-	-- handle beacon lights to call unload driver
-	-- copy/paste from AIDriveStrategyCombine
-	local fillLevel = self.vehicle:getFillUnitFillLevel(self.combine.fillUnitIndex)
-	local capacity = self.vehicle:getFillUnitCapacity(self.combine.fillUnitIndex)
-	if fillLevel > (0.8 * capacity) then
-		if not self.beaconLightsActive then
-			self.vehicle:setAIMapHotspotBlinking(true)
-			self.vehicle:setBeaconLightsVisibility(true)
-			self.beaconLightsActive = true
-		end
-	else
-		if self.beaconLightsActive then
-			self.vehicle:setAIMapHotspotBlinking(false)
-			self.vehicle:setBeaconLightsVisibility(false)
-			self.beaconLightsActive = false
-		end
-	end
-end
-
 --- Create a temporary course to pull back to the right when the pipe is in the fruit so the tractor does not have
 -- to drive in the fruit to get under the pipe
 function AIDriveStrategyCombineCourse:createPullBackCourse()
@@ -1057,6 +1036,12 @@ function AIDriveStrategyCombineCourse:isWaitingForUnloadAfterPulledBack()
 			self.unloadState == self.states.WAITING_FOR_UNLOAD_AFTER_PULLED_BACK
 end
 
+
+--- Can the cutter be turned off ?
+function AIDriveStrategyCombineCourse:getCanCutterBeTurnedOff()
+	return self:isWaitingForUnload() or self.state == self.states.UNLOADING_ON_FIELD and self:isUnloadStateOneOf(self.selfUnloadStates)
+end
+
 -----------------------------------------------------------------------------------------------------------------------
 --- Turns
 -----------------------------------------------------------------------------------------------------------------------
@@ -1073,7 +1058,7 @@ end
 function AIDriveStrategyCombineCourse:startTurn(ix)
 	self:debug('Starting a combine turn.')
 
-	self.turnContext = TurnContext(self.course, ix, ix + 1, self.turnNodes, self:getWorkWidth(),
+	self.turnContext = TurnContext(self.vehicle, self.course, ix, ix + 1, self.turnNodes, self:getWorkWidth(),
 			self.frontMarkerDistance, self.backMarkerDistance,
 			self:getTurnEndSideOffset(), self:getTurnEndForwardOffset())
 
@@ -1499,7 +1484,6 @@ function AIDriveStrategyCombineCourse:startSelfUnload()
 		-- little straight section parallel to the trailer to align better
 		self.selfUnloadAlignCourse = Course.createFromNode(self.vehicle, targetNode,
 				offsetX, -alignLength + 1, -self.pipeOffsetZ, 1, false)
-		self.selfUnloadAlignCourse:print()
 	local fieldNum = CpFieldUtil.getFieldNumUnderVehicle(self.vehicle)
 		local done, path
 		-- require full accuracy from pathfinder as we must exactly line up with the trailer
@@ -1700,6 +1684,16 @@ function AIDriveStrategyCombineCourse:initUnloadStates()
 		self.states.WAITING_FOR_UNLOAD_IN_POCKET,
 		self.states.WAITING_FOR_UNLOAD_AFTER_FIELDWORK_ENDED,
 		self.states.WAITING_FOR_UNLOAD_BEFORE_STARTING_NEXT_ROW
+	}
+	--- All self unload states.
+	self.selfUnloadStates = {
+		self.states.DRIVING_TO_SELF_UNLOAD,
+		self.states.SELF_UNLOADING,
+		self.states.SELF_UNLOADING_WAITING_FOR_DISCHARGE,
+		self.states.DRIVING_TO_SELF_UNLOAD_AFTER_FIELDWORK_ENDED,
+		self.states.SELF_UNLOADING_AFTER_FIELDWORK_ENDED,
+		self.states.SELF_UNLOADING_AFTER_FIELDWORK_ENDED_WAITING_FOR_DISCHARGE,
+		self.states.RETURNING_FROM_SELF_UNLOAD
 	}
 end
 

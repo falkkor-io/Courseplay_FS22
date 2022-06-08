@@ -257,7 +257,9 @@ function CpAIFieldWorker:getCanStartCpFieldWork()
             AIUtil.hasChildVehicleWithSpecialization(self, VineCutter) or 
             AIUtil.hasChildVehicleWithSpecialization(self, VinePrepruner) or
             --- precision farming
-            AIUtil.hasChildVehicleWithSpecialization(self, nil, "spec_soilSampler") then
+            AIUtil.hasChildVehicleWithSpecialization(self, nil, "spec_soilSampler") or 
+            --- FS22_aPalletAutoLoader from Achimobil: https://bitbucket.org/Achimobil79/ls22_palletautoloader/src/master/
+            AIUtil.hasChildVehicleWithSpecialization(self, nil, "spec_aPalletAutoLoader") then
         return true
     end
     return self:getCanStartFieldWork()
@@ -297,7 +299,7 @@ end
 -- We replace the Giants AIDriveStrategyStraight with our AIDriveStrategyFieldWorkCourse  to take care of
 -- field work.
 function CpAIFieldWorker:replaceAIFieldWorkerDriveStrategies(jobParameters, startPosition)
-    CpUtil.infoVehicle(self, 'This is a CP field work job, start the CP AI driver, setting up drive strategies...')
+    CpUtil.debugVehicle(CpDebug.DBG_FIELDWORK, self, 'This is a CP field work job, start the CP AI driver, setting up drive strategies...')
     local spec = self.spec_aiFieldWorker
     if spec.driveStrategies ~= nil then
         for i = #spec.driveStrategies, 1, -1 do
@@ -310,10 +312,10 @@ function CpAIFieldWorker:replaceAIFieldWorkerDriveStrategies(jobParameters, star
     local cpDriveStrategy
     --- Checks if there are any vine nodes close to the starting point.
     if startPosition and g_vineScanner:hasVineNodesCloseBy(startPosition.x, startPosition.z) then 
-        CpUtil.infoVehicle(self, 'Found a vine course, install CP vine fieldwork drive strategy for it')
+        CpUtil.debugVehicle(CpDebug.DBG_FIELDWORK, self, 'Found a vine course, install CP vine fieldwork drive strategy for it')
         cpDriveStrategy = AIDriveStrategyVineFieldWorkCourse.new()
     elseif AIUtil.hasImplementWithSpecialization(self, Plow) then 
-        CpUtil.infoVehicle(self, 'Found a plow, install CP plow drive strategy for it')
+        CpUtil.debugVehicle(CpDebug.DBG_FIELDWORK, self, 'Found a plow, install CP plow drive strategy for it')
         cpDriveStrategy = AIDriveStrategyPlowCourse.new()
     else
         local combine = AIUtil.getImplementOrVehicleWithSpecialization(self, Combine) 
@@ -321,12 +323,12 @@ function CpAIFieldWorker:replaceAIFieldWorkerDriveStrategies(jobParameters, star
         if combine and pipe or -- Default harvesters with a pipe.
             SpecializationUtil.hasSpecialization(Combine, self.specializations) then -- Cotton harvester
             --- TODO: Make sure the combine strategy is only used for combines with a pipe and not the cotton harvesters!
-            CpUtil.infoVehicle(self, 'Found a combine with pipe, install CP combine drive strategy for it')
+            CpUtil.debugVehicle(CpDebug.DBG_FIELDWORK, self, 'Found a combine with pipe, install CP combine drive strategy for it')
             cpDriveStrategy = AIDriveStrategyCombineCourse.new()
             self.spec_cpAIFieldWorker.combineDriveStrategy = cpDriveStrategy
         end
         if not cpDriveStrategy then 
-            CpUtil.infoVehicle(self, 'Installing default CP fieldwork drive strategy')
+            CpUtil.debugVehicle(CpDebug.DBG_FIELDWORK, self, 'Installing default CP fieldwork drive strategy')
             cpDriveStrategy = AIDriveStrategyFieldWorkCourse.new()
         end
     end
